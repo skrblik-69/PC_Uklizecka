@@ -9,6 +9,9 @@ import ctypes
 import webbrowser
 import tkinter as tk
 from tkinter import messagebox
+from send2trash import send2trash
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
 # ------------------------
 # Helper Functions
@@ -20,7 +23,7 @@ def get_free_space():
 def safe_delete(path):
     try:
         if os.path.isfile(path) or os.path.islink(path):
-            os.remove(path)
+            send2trash(path)
         elif os.path.isdir(path):
             shutil.rmtree(path)
         return True
@@ -59,6 +62,7 @@ def system_stats():
     cpu = psutil.cpu_percent()
     ram = psutil.virtual_memory().percent
     log_insert(f"📊 CPU: {cpu}% | RAM: {ram}%", "info")
+    return cpu, ram
 
 def clean_ram():
     log_insert("🧹 Cleaning RAM cache...", "info")
@@ -68,43 +72,13 @@ def clean_ram():
     except Exception as e:
         log_insert(f"⚠️ Failed to clean RAM: {e}", "warning")
 
-# ------------------------
-# GUI Helpers
-# ------------------------
-def rgb_cycle(widget, colors, delay=150, property_name="text_color"):
-    index = 0
-    def cycle():
-        nonlocal index
-        try:
-            if property_name == "text_color":
-                widget.configure(text_color=colors[index])
-            elif property_name == "progress_color":
-                widget.configure(progress_color=colors[index])
-            else:
-                widget.configure(fg_color=colors[index])
-        except:
-            pass
-        index = (index + 1) % len(colors)
-        widget.after(delay, cycle)
-    cycle()
-
-def create_button_with_glow(master, text, command, width=220, height=50, glow_color="#a855f7"):
-    container = ctk.CTkFrame(master, width=width, height=height+20, corner_radius=25, fg_color="#1f2937")
-    container.pack_propagate(False)
-    container.pack(pady=5)
-
-    canvas = tk.Canvas(container, width=width, height=height+20, highlightthickness=0, bg="#1f2937")
-    canvas.place(x=0, y=0)
-
-    for i in range(15):
-        canvas.create_rectangle(0, i, width, i+1, fill=glow_color, outline="")
-
-    btn = ctk.CTkButton(container, text=text, command=command,
-                        fg_color="#111827", hover_color="#1f2937",
-                        width=width, height=height, corner_radius=20,
-                        font=("Segoe UI", 15, "bold"))
-    btn.place(x=0, y=10)
-    return btn
+def clean_downloads():
+    downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
+    if not os.path.exists(downloads_path):
+        log_insert("⚠️ Downloads folder not found", "warning")
+        return
+    freed, failed = clean_directory(downloads_path, "Downloads")
+    log_insert(f"💾 Cleared {freed/1024/1024:.2f} MB from Downloads", "success")
 
 # ------------------------
 # Log System
@@ -147,9 +121,9 @@ def boost(normal=True, premium=False):
         time.sleep(0.5)
 
         clean_directory(tempfile.gettempdir(), "TEMP folders")
-        time.sleep(0.3)
         empty_recycle_bin()
-        time.sleep(0.3)
+        clean_downloads()
+        time.sleep(0.5)
 
         if premium:
             clean_directory(os.path.expanduser("~\\AppData\\Local\\Microsoft\\Windows\\INetCache"), "Cache")
@@ -160,7 +134,8 @@ def boost(normal=True, premium=False):
             time.sleep(0.3)
 
         clean_ram()
-        system_stats()
+        cpu, ram = system_stats()
+        update_cpu_ram_chart(cpu, ram)
         log_insert("🎉 Optimization complete!", "success")
         progress.stop()
         messagebox.showinfo("Done", "Optimization complete!")
@@ -173,28 +148,44 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
 root = ctk.CTk()
 root.title("PC Booster 🚀")
-root.geometry("900x800")
+root.geometry("1000x850")
+root.configure(fg_color="#0f0f0f")  # černé pozadí
 
 # Title
-title = ctk.CTkLabel(root, text="⚡ PC Booster 🚀", font=("Segoe UI",28,"bold"))
+title = ctk.CTkLabel(root, text="⚡ PC Booster 🚀", font=("Segoe UI",28,"bold"), text_color="white")
 title.pack(pady=10)
 
-# Premium Banner with glow (hidden initially)
+# ------------------------
+# Function to create under-glow
+# ------------------------
+def create_under_glow(widget, color="#a855f7", height=15):
+    """Creates a subtle under-glow gradient below a widget."""
+    # Make sure widget update to get width
+    widget.update()
+    width = widget.winfo_width()
+    glow = tk.Canvas(widget.master, width=width, height=height, highlightthickness=0, bg="#0f0f0f")
+    glow.pack(after=widget)
+    # Draw gradient
+    steps = height
+    for i in range(steps):
+        alpha = int(255 * (1 - i/steps))
+        hex_color = f"#{alpha:02x}{int(alpha*0.65):02x}{int(alpha*1.0):02x}"  # gradient fialová
+        glow.create_line(0, i, width, i, fill=color)
+    widget.lift()
+    return glow
+
+# Premium Banner (hidden)
 banner_container = ctk.CTkFrame(root, width=400, height=50, corner_radius=20, fg_color="#111827")
 banner_container.pack(pady=5)
-canvas_banner = tk.Canvas(banner_container, width=400, height=50, highlightthickness=0, bg="#111827")
-canvas_banner.place(x=0, y=0)
-for i in range(15):
-    canvas_banner.create_rectangle(0, i, 400, i+1, fill="#ff00ff", outline="")
-premium_banner = ctk.CTkLabel(banner_container, text="🌟 PREMIUM ACTIVE 🌟", font=("Segoe UI",18,"bold"), fg_color="#111827")
-premium_banner.pack_forget()  # hidden initially
+premium_banner = ctk.CTkLabel(banner_container, text="🌟 PREMIUM ACTIVE 🌟", font=("Segoe UI",18,"bold"), fg_color="#111827", text_color="white")
+premium_banner.pack_forget()
 
 # Log frame
-log_frame = ctk.CTkFrame(root, corner_radius=15)
+log_frame = ctk.CTkFrame(root, corner_radius=15, fg_color="#1a1a1a")
 log_frame.pack(padx=10,pady=10, fill="both", expand=False)
 
 # Filter checkboxes
-filter_frame = ctk.CTkFrame(log_frame, corner_radius=10)
+filter_frame = ctk.CTkFrame(log_frame, corner_radius=10, fg_color="#1a1a1a")
 filter_frame.pack(pady=5, fill="x")
 
 filter_vars = {
@@ -208,11 +199,11 @@ filter_vars = {
 
 for key in ["all","success","warning","error","premium","info"]:
     cb = ctk.CTkCheckBox(filter_frame, text=key.capitalize(), variable=filter_vars[key],
-                          command=update_log_filter)
+                          command=update_log_filter, text_color="white", fg_color="#a855f7", hover_color="#c084fc")
     cb.pack(side="left", padx=5)
 
 # Log box
-log_box = tk.Text(log_frame, width=100, height=15, bg="#1f2937", fg="white", font=("Consolas",11))
+log_box = tk.Text(log_frame, width=100, height=15, bg="#1a1a1a", fg="white", font=("Segoe UI",11))
 log_box.pack(padx=10,pady=10, fill="both", expand=True)
 log_box.tag_config("success", foreground="#22c55e")
 log_box.tag_config("warning", foreground="#facc15")
@@ -222,7 +213,7 @@ log_box.tag_config("info", foreground="white")
 log_box.configure(state="disabled")
 
 # Top frame for code input + premium boost
-top_frame = ctk.CTkFrame(root, corner_radius=15)
+top_frame = ctk.CTkFrame(root, corner_radius=15, fg_color="#1a1a1a")
 top_frame.pack(pady=10)
 
 code_entry = ctk.CTkEntry(top_frame, placeholder_text="Enter code", width=200)
@@ -232,25 +223,51 @@ def activate_premium():
     code = code_entry.get().strip()
     if code == "8791-gbdo":
         premium_banner.pack(expand=True, fill="both")
+        create_under_glow(premium_banner, color="#c084fc", height=15)
         log_insert("🌟 PREMIUM features unlocked!", "premium")
-        boost(premium=True)
+        boost(normal=True, premium=True)
     else:
         messagebox.showerror("Error", "❌ Invalid code!")
 
-premium_button = create_button_with_glow(top_frame, "Premium Boost", activate_premium, width=200, height=50, glow_color="#ff00ff")
+premium_button = ctk.CTkButton(top_frame, text="Premium Boost", command=activate_premium,
+                               width=200, height=50, fg_color="#a855f7", hover_color="#c084fc", text_color="white")
 premium_button.pack(side="left", padx=10)
+create_under_glow(premium_button)
 
 # Normal Boost
-boost_button = create_button_with_glow(root, "Run Boost", lambda: boost(normal=True), width=250, height=60, glow_color="#a855f7")
+boost_button = ctk.CTkButton(root, text="Run Boost", command=lambda: boost(normal=True),
+                             width=250, height=60, fg_color="#a855f7", hover_color="#c084fc", text_color="white")
 boost_button.pack(pady=20)
+create_under_glow(boost_button)
 
 # Progress bar
 progress = ctk.CTkProgressBar(root, mode="indeterminate", width=700)
 progress.pack(pady=10)
-rgb_cycle(progress, ["#ff0000","#00ff00","#0000ff"],150,property_name="progress_color")
+
+# ------------------------
+# CPU/RAM Chart
+# ------------------------
+fig = Figure(figsize=(8,2.5), dpi=100)
+ax = fig.add_subplot(111)
+ax.set_ylim(0,100)
+ax.set_title("CPU / RAM Usage", color="white")
+ax.set_ylabel("%", color="white")
+ax.set_xlabel("Metric", color="white")
+ax.tick_params(axis='x', colors='white')
+ax.tick_params(axis='y', colors='white')
+bars = ax.bar(["CPU","RAM"], [0,0], color=["#ff0000","#00ff00"])
+canvas = FigureCanvasTkAgg(fig, master=root)
+canvas.get_tk_widget().pack(pady=10)
+
+def update_cpu_ram_chart(cpu, ram):
+    bars[0].set_height(cpu)
+    bars[1].set_height(ram)
+    canvas.draw()
 
 # Discord button
-discord_button = create_button_with_glow(root, "💬 Join Discord", lambda: webbrowser.open("https://discord.gg/gvEbhcb7Rk"), width=220, height=50, glow_color="#22c55e")
+discord_button = ctk.CTkButton(root, text="💬 Join Discord", command=lambda: webbrowser.open("https://discord.gg/gvEbhcb7Rk"),
+                               width=220, height=50, fg_color="#a855f7", hover_color="#c084fc", text_color="white")
 discord_button.pack(pady=10)
+create_under_glow(discord_button)
 
 root.mainloop()
